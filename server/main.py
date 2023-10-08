@@ -1,41 +1,58 @@
-from os import getenv
-
+from fastapi import FastAPI, Query, HTTPException
+from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 import openai
+import os
+import sys
+
+# Getting OpenAI API Key
+
+openai.api_key = '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'
+
+# Defining the FastAPI app and metadata
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
-def review_code(source_code):
-    # openai.api_key = getenv('OPENAI_API_KEY')
-    openai.api_key = getenv('OPENAI_API_KEY')
-    # Create a list to store all the messages for context
-    messages = []
+# Defining error in case of 503 from OpenAI
+error503 = "OpenAI server is busy, try again later"
 
-    # Add the source_code to the list
-    messages.append({'role': 'user', 'content': source_code})
 
-    # Add the prompt to modify the code
-    instructions = 'Do a in depth proper code review, make the code documented, and put better comments where needed.'
-    messages.append({'role': 'user', 'content': instructions})
+def get_response_openai():
+    try:
+        source_code = '''
+        def add(a, b):
+            return a + b
+        '''
+        instructions = 'Do an in-depth code review, add documentation, and improve comments.'
 
-    # Request gpt-3.5-turbo for chat completion
-    response = openai.ChatCompletion.create(
-        model='gpt-3.5-turbo-0613',
-        messages=messages,
-        stream=True
-    )
+        messages = [
+            {'role': 'system', 'content': 'You are an experienced software engineer reviewing a random code snippet.'},
+            {'role': 'user', 'content': source_code},
+            {'role': 'user', 'content': instructions}
+        ]
+        response = openai.ChatCompletion.create(
+            model='gpt-3.5-turbo-0613',
+            messages=messages,
+            stream=True
+        )
+    except Exception as e:
+        print("Error in creating campaigns from OpenAI:", str(e))
+        raise HTTPException(503, detail=str(e))
 
-    output = ''
     for chunk in response:
-        if 'content' in chunk.choices[0].delta:
-            output += chunk.choices[0].delta['content']
-            print(chunk.choices[0].delta)
-
-    return output
+        current_content = chunk["choices"][0]["delta"].get("content", "")
+        yield current_content
+        # print(current_content)
 
 
-if __name__ == '__main__':
-    output = review_code('''
-    def add(a, b):
-        return a + b
-    ''')
-
-    print(output)
+@app.get("/review-code")
+async def campaign():
+    # get_response_openai()
+    return StreamingResponse(get_response_openai(), media_type="text/event-stream")
